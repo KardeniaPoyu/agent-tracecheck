@@ -1,0 +1,5 @@
+{"id":"missing-result","messages":[{"role":"user","content":"Find the weather."},{"role":"assistant","tool_calls":[{"id":"weather-1","function":{"name":"weather","arguments":"{}"}}]},{"role":"assistant","content":"Sunny."}],"reward":1,"outcome":"failure"}
+{"id":"attempt-1","task_id":"retry-task","attempt_id":"1","split":"train","messages":[{"role":"user","content":"Say hello."},{"role":"assistant","content":"Hello."}],"reward":1}
+{"id":"attempt-2","task_id":"retry-task","attempt_id":"2","split":"test","messages":[{"role":"user","content":"Say hello."},{"role":"assistant","content":"Hello."}],"reward":0}
+{"id":"mask-leak","messages":[{"role":"user","content":"Secret prompt"},{"role":"assistant","content":"Partial answer"}],"input_ids":[11,12,0],"labels":[11,99,0],"loss_mask":[1,0,1],"attention_mask":[1,1,0],"token_roles":["user","assistant","assistant"],"eos_token_id":13,"finish_reason":"length"}
+{"id":"orphan","messages":[{"role":"tool","tool_call_id":"unknown","content":"unexpected"}],"reward":2}

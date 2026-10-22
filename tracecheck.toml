@@ -1,0 +1,12 @@
+[tracecheck]
+reward_min = 0.0
+reward_max = 1.0
+success_reward_min = 0.5
+failure_reward_max = 0.0
+ignore_index = -100
+train_roles = ["assistant"]
+require_final_assistant = true
+disabled_rules = []
+
+[tracecheck.severity]
+# REWARD_OUTCOME = "error"

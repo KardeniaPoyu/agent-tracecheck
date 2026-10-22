@@ -2,6 +2,8 @@
 
 One trajectory is a JSON object. Extra metadata is retained in source data but not interpreted.
 
+JSON input rejects duplicate keys, nonfinite numeric values and nesting deeper than 256 containers. The explicit depth bound is consistent across supported Python versions; brackets inside strings do not count.
+
 ```json
 {
   "id": "sample-1", "task_id": "task-1", "attempt_id": "attempt-1", "split": "train",

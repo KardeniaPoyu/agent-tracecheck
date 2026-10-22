@@ -15,6 +15,28 @@ from .model import Record, Source
 
 
 def strict_json(text: str):
+    # CPython's decoder recursion thresholds vary across versions. Enforce the
+    # same explicit bound before decoding, ignoring brackets inside strings.
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > 256:
+                raise ValueError("JSON nesting exceeds the supported limit of 256 containers")
+        elif char in "]}":
+            depth -= 1
+
     def pairs(items):
         result = {}
         for key, value in items:

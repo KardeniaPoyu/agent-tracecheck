@@ -212,3 +212,14 @@ def test_sarif_repository_relative_uri(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = sarif_report(scan([path]))["runs"][0]["results"][0]
     assert result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "data%20space.jsonl"
+
+
+def test_json_depth_bound_is_explicit():
+    assert strict_json("[" * 256 + "0" + "]" * 256)
+    with pytest.raises(ValueError, match="256"):
+        strict_json("[" * 257 + "0" + "]" * 257)
+
+
+def test_json_depth_ignores_escaped_strings():
+    content = "[" * 1000 + '\\"' + "]" * 1000
+    assert strict_json(json.dumps({"content": content}))["content"] == content

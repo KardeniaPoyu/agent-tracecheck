@@ -6,6 +6,7 @@ from typing import Callable
 
 from .adapters import messages
 from .model import Config, finite_number
+from .io import strict_json
 
 ROLES = {"system", "developer", "user", "assistant", "tool"}
 
@@ -14,6 +15,10 @@ def check_record(raw: object, config: Config, emit: Callable) -> list:
     if not isinstance(raw, dict):
         emit("SCHEMA_RECORD", "", "Trajectory must be a JSON object.")
         return []
+    check_reward(raw, config, emit)
+    check_masks(raw, config, emit)
+    if sum(key in raw for key in ("messages", "conversations", "events")) > 1:
+        emit("SCHEMA_FIELD", "", "Multiple message arrays are ambiguous; export exactly one.")
     rows, key, original = messages(raw)
     if not isinstance(original, list) or not original:
         emit("SCHEMA_RECORD", f"/{key}", "A nonempty message array is required.")
@@ -21,6 +26,12 @@ def check_record(raw: object, config: Config, emit: Callable) -> list:
     pending, seen, resolved = {}, {}, set()
     for index, msg in enumerate(rows):
         ptr, role = msg.pointer, msg.role
+        if "function_call" in msg.data:
+            emit(
+                "TOOL_LEGACY_FORMAT",
+                ptr + "/function_call",
+                "Legacy function_call has no explicit pairing contract.",
+            )
         if "tool_call_id" in msg.data and not isinstance(msg.result_id, str):
             emit("SCHEMA_FIELD", ptr + "/tool_call_id", "tool_call_id must be a string.")
         if not isinstance(original[index], dict) or not isinstance(role, str) or role not in ROLES:
@@ -63,15 +74,11 @@ def check_record(raw: object, config: Config, emit: Callable) -> list:
                 continue
             args = fn.get("arguments")
             try:
-                parsed = (
-                    json.loads(args, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
-                    if isinstance(args, str)
-                    else args
-                )
+                parsed = strict_json(args) if isinstance(args, str) else args
                 if not isinstance(parsed, dict):
                     raise ValueError("not an object")
                 json.dumps(parsed, allow_nan=False)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, RecursionError):
                 emit(
                     "TOOL_ARGUMENTS",
                     cp + "/function/arguments",
@@ -114,8 +121,6 @@ def check_record(raw: object, config: Config, emit: Callable) -> list:
     for field in ("id", "task_id", "attempt_id", "split"):
         if field in raw and (not isinstance(raw[field], str) or not raw[field]):
             emit("SCHEMA_FIELD", f"/{field}", f"{field} must be a nonempty string.")
-    check_reward(raw, config, emit)
-    check_masks(raw, config, emit)
     return rows
 
 
@@ -124,6 +129,8 @@ def check_reward(raw: dict, config: Config, emit: Callable) -> None:
     if "outcome" in raw and outcome not in ("success", "failure", "unknown"):
         emit("SCHEMA_FIELD", "/outcome", "outcome must be success, failure, or unknown.")
     if "reward" not in raw:
+        if "reward_components" in raw:
+            emit("REWARD_COMPONENTS", "/reward_components", "Additive components require a scalar reward.")
         return
     reward = raw["reward"]
     if not finite_number(reward):
@@ -165,10 +172,12 @@ def check_reward(raw: dict, config: Config, emit: Callable) -> None:
 def check_masks(raw: dict, config: Config, emit: Callable) -> None:
     fields = ("input_ids", "labels", "loss_mask", "attention_mask", "token_roles")
     arrays = {}
+    invalid = False
     for name in fields:
         if name in raw:
             value = raw[name]
             if not isinstance(value, list):
+                invalid = True
                 emit("MASK_VALUE", f"/{name}", f"{name} must be an array.")
                 continue
             arrays[name] = value
@@ -182,13 +191,19 @@ def check_masks(raw: dict, config: Config, emit: Callable) -> None:
                     for v in value
                 )
             if not valid:
+                invalid = True
                 emit("MASK_VALUE", f"/{name}", f"{name} contains invalid values.")
+    if invalid:
+        return
     if not arrays:
         return
     if "input_ids" not in arrays:
         emit("SCHEMA_FIELD", "/input_ids", "Token supervision requires input_ids.")
         return
     n = len(arrays["input_ids"])
+    if n == 0:
+        emit("MASK_EMPTY", "/input_ids", "Tokenized sequence is empty.")
+        return
     for name, value in arrays.items():
         if len(value) != n:
             emit("MASK_LENGTH", f"/{name}", f"{name} length {len(value)} differs from input_ids length {n}.")

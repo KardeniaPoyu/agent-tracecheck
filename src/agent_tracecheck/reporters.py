@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 from .model import Report
 from .rules import RULES
@@ -29,6 +30,10 @@ def sarif_report(report: Report) -> dict:
     for i in report.issues:
         source = i.source
         uri = Path(source.path).as_uri() if Path(source.path).is_absolute() else source.path
+        try:
+            uri = quote(Path(source.path).resolve().relative_to(Path.cwd().resolve()).as_posix())
+        except ValueError:
+            pass
         results.append(
             {
                 "ruleId": i.rule,
@@ -60,7 +65,7 @@ def sarif_report(report: Report) -> dict:
                 "tool": {
                     "driver": {
                         "name": "agent-tracecheck",
-                        "version": "0.1.0",
+                        "version": "0.2.0",
                         "rules": [
                             {
                                 "id": k,

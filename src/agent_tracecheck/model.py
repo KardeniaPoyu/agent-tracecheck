@@ -35,6 +35,7 @@ class Record:
     raw: Any
     source: Source = field(default_factory=Source)
     parse_error: str | None = None
+    input_rule: str = "INPUT_JSON"
 
     @property
     def sha256(self) -> str:
@@ -65,20 +66,26 @@ class Config:
             raise ValueError("success_reward_min must be inside the reward range")
         if not self.reward_min <= self.failure_reward_max <= self.reward_max:
             raise ValueError("failure_reward_max must be inside the reward range")
-        if type(self.ignore_index) is not int:
-            raise ValueError("ignore_index must be an integer")
+        if type(self.ignore_index) is not int or self.ignore_index >= 0:
+            raise ValueError("ignore_index must be a negative integer")
         if type(self.require_final_assistant) is not bool:
             raise ValueError("require_final_assistant must be a boolean")
         if (
             not isinstance(self.train_roles, list)
             or not self.train_roles
-            or any(r not in {"assistant", "user", "system", "developer", "tool"} for r in self.train_roles)
+            or any(
+                not isinstance(r, str) or r not in {"assistant", "user", "system", "developer", "tool"}
+                for r in self.train_roles
+            )
         ):
             raise ValueError("train_roles must be a nonempty list of supported roles")
-        if not isinstance(self.disabled_rules, list) or any(r not in RULES for r in self.disabled_rules):
+        if not isinstance(self.disabled_rules, list) or any(
+            not isinstance(r, str) or r not in RULES for r in self.disabled_rules
+        ):
             raise ValueError("disabled_rules contains an unknown rule")
         if not isinstance(self.severity, dict) or any(
-            k not in RULES or v not in {"error", "warning", "info"} for k, v in self.severity.items()
+            k not in RULES or not isinstance(v, str) or v not in {"error", "warning", "info"}
+            for k, v in self.severity.items()
         ):
             raise ValueError("severity must map known rules to error, warning, or info")
 
@@ -111,7 +118,7 @@ class Report:
         counts = {s: sum(i.severity == s for i in self.issues) for s in ("error", "warning", "info")}
         return {
             "schema_version": "1.0",
-            "tool": {"name": "agent-tracecheck", "version": "0.1.0"},
+            "tool": {"name": "agent-tracecheck", "version": "0.2.0"},
             "config": asdict(self.config),
             "summary": {"files": self.files, "records": self.records, "issues": len(self.issues), **counts},
             "issues": [i.to_dict() for i in self.issues],

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import tomllib
 from pathlib import Path
 
 from .engine import scan
-from .io import discover
+from .io import atomic_write_text, discover, strict_json
 from .model import Config
 from .reporters import render
 from .reproduce import reproduce
@@ -18,8 +17,10 @@ def load_config(path: str | None) -> Config:
     if path is None:
         return Config()
     target = Path(path)
-    if target.suffix == ".json":
-        data = json.loads(target.read_text(encoding="utf-8"))
+    if target.suffix.lower() == ".json":
+        data = strict_json(target.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Configuration must be an object/table")
         # Reproduction metadata can be used directly, preserving exact policy.
         values = data.get("config", data)
     else:
@@ -39,7 +40,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="agent-tracecheck", description="Lint agent trajectories before SFT / RL training."
     )
-    p.add_argument("--version", action="version", version="agent-tracecheck 0.1.0")
+    p.add_argument("--version", action="version", version="agent-tracecheck 0.2.0")
     commands = p.add_subparsers(dest="command", required=True)
     s = commands.add_parser("scan", help="Scan JSON/JSONL files or directories")
     s.add_argument("paths", nargs="+")
@@ -50,6 +51,13 @@ def parser() -> argparse.ArgumentParser:
         s.add_argument(f"--{fmt}", metavar="PATH", help=f"Also write a {fmt} report")
     s.add_argument("--fail-on", choices=["error", "warning", "info", "none"], default="error")
     s.add_argument("--disable", action="append", default=[], metavar="RULE")
+    s.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Exclude relative input paths, e.g. reports/* (repeatable)",
+    )
     commands.add_parser("rules", help="List checks and their default severity")
     e = commands.add_parser("explain", help="Explain one check and its remediation")
     e.add_argument("rule", choices=sorted(RULES))
@@ -81,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         config.disabled_rules = list(dict.fromkeys(config.disabled_rules + args.disable))
         config.validate()
-        files = discover(args.paths)
+        files = discover(args.paths, args.exclude)
         destinations = [(args.format, args.output)] if args.output else []
         destinations += [
             (fmt, getattr(args, fmt)) for fmt in ("json", "html", "sarif", "markdown") if getattr(args, fmt)
@@ -94,11 +102,11 @@ def main(argv: list[str] | None = None) -> int:
             protected.add(Path(args.config).resolve())
         if any(path in protected for path in output_paths):
             raise ValueError("Report output cannot overwrite input data or configuration")
+        if any(out.exists() and out.samefile(src) for out in output_paths for src in protected):
+            raise ValueError("Report output cannot overwrite a hard link to input data or configuration")
         report = scan(files, config)
         for fmt, path in destinations:
-            target = Path(path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(render(report, fmt), encoding="utf-8")
+            atomic_write_text(path, render(report, fmt))
         if not args.output:
             sys.stdout.write(render(report, args.format))
         else:
@@ -109,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         levels = {"none": 4, "error": 3, "warning": 2, "info": 1}
         return int(any(levels[i.severity] >= levels[args.fail_on] for i in report.issues))
-    except (OSError, ValueError, TypeError, KeyError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, EOFError, RecursionError) as exc:
         print(f"agent-tracecheck: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

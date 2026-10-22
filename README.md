@@ -2,10 +2,12 @@
 
 **像检查代码一样检查 Agent 训练轨迹。** 在数据进入 SFT / RL 之前，定位工具配对、重试重复、奖励矛盾、截断和训练掩码问题。
 
+[English](README.en.md) · [Changelog](CHANGELOG.md)
+
 Python 3.11+ · 零运行时第三方依赖 · 本地离线处理 · MIT
 
 ```text
-Agent logs → JSON / JSONL → 34 quality rules → Evidence + reproduction + remediation
+Agent logs → JSON / JSONL → 36 quality rules → Evidence + reproduction + remediation
                                      └── JSON / HTML / SARIF / Markdown → CI
 ```
 
@@ -95,8 +97,12 @@ python -m build
 - `events` 是本工具的消息别名，不会自动重建执行图、处理跨轨迹的工具 ID 或猜测 legacy function_call 的配对。
 - 报告含本地路径、工具 ID 和诊断；复现含原数据。工具不联网、不执行轨迹内容、不原地修复数据。
 
-本项目为可运行的 **0.1.0 alpha**，提供规则测试和可复现工作流；接入实际训练前应使用你自己的数据分布与奖励策略校准误报率。
+本项目为可运行的 **0.2.0 alpha**，提供规则测试和可复现工作流；接入实际训练前应使用你自己的数据分布与奖励策略校准误报率。
 
 ## 贡献
 
 见 [CONTRIBUTING.md](CONTRIBUTING.md)、[规则目录](docs/rules.md) 和 [安全说明](SECURITY.md)。优先欢迎新的真实缺陷样本、带负例的规则和明确格式契约的适配器。
+
+## 0.2.0 输入加固
+
+支持 `.json.gz`、`.jsonl.gz`、`.ndjson.gz`；`--exclude "reports/*"` 可重复使用，匹配各输入目录下的相对路径。空数据会报错。JSON 重复键、NaN/Infinity 和浮点溢出会作为 INPUT_JSON 报告；Python API 的非有限奖励仍由 REWARD_INVALID 检查。旧式 function_call 和同时出现多个消息数组会明确报错。ignore_index 必须为负整数。SARIF 在当前仓库内使用相对路径；报告通过临时文件原子替换。

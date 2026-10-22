@@ -3,5 +3,5 @@
 from .engine import scan, scan_records
 from .model import Config, Record, Source
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["Config", "Record", "Source", "scan", "scan_records"]

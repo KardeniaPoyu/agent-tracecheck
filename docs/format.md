@@ -22,7 +22,7 @@ One trajectory is a JSON object. Extra metadata is retained in source data but n
 
 Messages require role in system/developer/user/assistant/tool. Content may be string, structured array, or null. Structured content is compared exactly; image/audio payload semantics are not inspected. Tool calls require nonempty string ID and function name; arguments may be an object or JSON-encoded object. Missing call type means function. Parallel results may arrive in any order, before the next non-tool turn. Assistant weight, when supplied, must be integer 0 or 1.
 
-ShareGPT uses `conversations`, `from`, `value`; human→user, gpt→assistant, observation/function→tool. Tool messages still need explicit tool_call_id and structured tool_calls; unstructured function-call text is not parsed. `events` uses the same message structure. When multiple message arrays exist, precedence is messages, conversations, events.
+ShareGPT uses `conversations`, `from`, `value`; human→user, gpt→assistant, observation/function→tool. Tool messages still need explicit tool_call_id and structured tool_calls; unstructured function-call text is not parsed. `events` uses the same message structure. Export exactly one message array. Multiple aliases produce SCHEMA_FIELD; the first is still inspected for additional diagnostics.
 
 Reward is optional finite numeric data. Outcome is success/failure/unknown. reward_components declares an **additive** mapping; do not use it for arbitrary non-additive evaluator internals. Truncation is explicit boolean true or finish_reason length/max_tokens. Absence of truncation markers is not evidence of completeness.
 

@@ -1,5 +1,17 @@
 # Rule catalog
 
+## INPUT_EMPTY
+
+input / error — Empty dataset
+
+Check export filters and input selection; an empty dataset cannot pass the training quality gate.
+
+## TOOL_LEGACY_FORMAT
+
+tools / error — Unsupported legacy tool call
+
+Convert function_call to tool_calls with an explicit unique ID and preserve the corresponding tool_call_id. Do not infer pairing from name alone.
+
 ## INPUT_JSON
 
 input / error — Invalid JSON or UTF-8

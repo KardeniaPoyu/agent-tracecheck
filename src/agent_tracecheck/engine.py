@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import copy
 from dataclasses import asdict
 from pathlib import Path
 from typing import Iterable
@@ -10,7 +11,7 @@ from typing import Iterable
 from .adapters import semantic_messages
 from .checks import check_record
 from .io import discover, read_records
-from .model import Config, Issue, Record, Report, canonical, digest
+from .model import Config, Issue, Record, Report, Source, canonical, digest
 from .rules import RULES
 
 
@@ -22,10 +23,12 @@ class DuplicateIndex:
         self.db.executescript("""
             CREATE TABLE samples (hash TEXT, supervision TEXT, split TEXT, task TEXT, ref TEXT);
             CREATE INDEX sample_hash ON samples(hash);
+            CREATE INDEX sample_task ON samples(hash, task);
+            CREATE INDEX sample_variant ON samples(hash, supervision, split, task);
             CREATE TABLE ids (id TEXT PRIMARY KEY, hash TEXT, ref TEXT);
         """)
 
-    def check(self, record: Record, rows: list, emit) -> None:
+    def check_id(self, record: Record, emit) -> None:
         raw = record.raw
         ref = {"source": asdict(record.source), "record_sha256": record.sha256}
         ref_json = canonical(ref)
@@ -41,6 +44,10 @@ class DuplicateIndex:
                 )
             if not previous:
                 self.db.execute("INSERT INTO ids VALUES (?, ?, ?)", (record_id, record.sha256, ref_json))
+
+    def check(self, record: Record, rows: list, emit) -> None:
+        raw = record.raw
+        ref_json = canonical({"source": asdict(record.source), "record_sha256": record.sha256})
         signature = digest(semantic_messages(rows))
         supervision = digest(
             {
@@ -115,7 +122,7 @@ class DuplicateIndex:
 
 
 def scan_records(records: Iterable[Record], config: Config | None = None) -> Report:
-    config = config or Config()
+    config = copy.deepcopy(config or Config())
     config.validate()
     report = Report(config)
     paths = set()
@@ -123,7 +130,7 @@ def scan_records(records: Iterable[Record], config: Config | None = None) -> Rep
         index = DuplicateIndex(str(Path(tmp) / "index.sqlite3"))
         try:
             for record in records:
-                report.records += 1
+                report.records += int(not (record.parse_error and record.input_rule == "INPUT_EMPTY"))
                 paths.add(record.source.path)
                 observed = []
 
@@ -149,8 +156,10 @@ def scan_records(records: Iterable[Record], config: Config | None = None) -> Rep
                     )
 
                 if record.parse_error:
-                    emit("INPUT_JSON", "", record.parse_error)
+                    emit(record.input_rule, "", record.parse_error)
                     continue
+                if isinstance(record.raw, dict):
+                    index.check_id(record, emit)
                 rows = check_record(record.raw, config, emit)
                 # Malformed tool structures cannot be fingerprinted faithfully.
                 blocked = {
@@ -160,12 +169,29 @@ def scan_records(records: Iterable[Record], config: Config | None = None) -> Rep
                     "TOOL_CALL_FORMAT",
                     "TOOL_DUPLICATE_ID",
                     "TOOL_ORPHAN_RESULT",
+                    "TOOL_LEGACY_FORMAT",
+                    "TOOL_ARGUMENTS",
                 }
                 if rows and not blocked.intersection(observed):
                     index.check(record, rows, emit)
         finally:
             index.db.close()
     report.files = len(paths)
+    if not paths:
+        rule = RULES["INPUT_EMPTY"]
+        if "INPUT_EMPTY" not in config.disabled_rules:
+            report.issues.append(
+                Issue(
+                    digest(["INPUT_EMPTY"])[:16],
+                    "INPUT_EMPTY",
+                    config.severity.get("INPUT_EMPTY", rule.severity),
+                    "Input contains no trajectories.",
+                    Source(),
+                    "",
+                    rule.suggestion,
+                    digest(None),
+                )
+            )
     return report
 
 

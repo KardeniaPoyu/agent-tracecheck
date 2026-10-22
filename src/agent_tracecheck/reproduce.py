@@ -8,29 +8,43 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .engine import scan_records
-from .io import read_records
+from .io import read_records, strict_json
 from .model import Config, Record, Source
 
 
 def reproduce(report_path: str | Path, issue_id: str, output: str | Path, max_checks: int = 300) -> dict:
     report_path, output = Path(report_path).resolve(), Path(output).resolve()
     manifest_path = output.with_suffix(output.suffix + ".meta.json")
+    if type(max_checks) is not int or max_checks < 1:
+        raise ValueError("max_checks must be a positive integer")
+    if output.suffix.lower() not in {".jsonl", ".ndjson"}:
+        raise ValueError("Reproduction output must use .jsonl or .ndjson")
     if output.exists() or manifest_path.exists():
         raise ValueError("Reproduction output already exists; choose a new output path")
-    data = json.loads(report_path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != "1.0":
+    data = strict_json(report_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("schema_version") != "1.0":
         raise ValueError("Unsupported report schema version")
-    issue = next((i for i in data["issues"] if i["id"] == issue_id), None)
+    if not isinstance(data.get("issues"), list) or not all(isinstance(i, dict) for i in data["issues"]):
+        raise ValueError("Report issues must be an array of objects")
+    issue = next((i for i in data["issues"] if i.get("id") == issue_id), None)
     if issue is None:
         raise ValueError(f"Issue not found: {issue_id}")
-    if issue["rule"] == "INPUT_JSON":
+    if issue["rule"] in {"INPUT_JSON", "INPUT_EMPTY"}:
         raise ValueError(
             "Invalid JSON cannot be reproduced as valid JSONL; use the reported source line directly"
         )
     refs = issue["related"] + [{"source": issue["source"], "record_sha256": issue["record_sha256"]}]
     raw = []
     for ref in refs:
+        if not isinstance(ref, dict) or not isinstance(ref.get("source"), dict):
+            raise ValueError("Malformed report source reference")
         source = ref["source"]
+        if (
+            not isinstance(source.get("path"), str)
+            or type(source.get("record")) is not int
+            or source["record"] < 0
+        ):
+            raise ValueError("Malformed report source path or record index")
         path = Path(source["path"])
         if not path.is_file():
             raise ValueError(f"Original input unavailable: {path}")
@@ -85,7 +99,7 @@ def reproduce(report_path: str | Path, issue_id: str, output: str | Path, max_ch
         raise ValueError("Internal minimization verification failed")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        "".join(json.dumps(row, ensure_ascii=False, allow_nan=True) + "\n" for row in raw), encoding="utf-8"
+        "".join(json.dumps(row, ensure_ascii=True, allow_nan=False) + "\n" for row in raw), encoding="utf-8"
     )
     manifest = {
         "rule": issue["rule"],
